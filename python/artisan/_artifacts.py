@@ -414,13 +414,24 @@ class _Namespace(Dict[str, object]):
     def __getattribute__(self, key: str) -> Any:
         if key == '__dict__': return self
         else: return object.__getattribute__(self, key)
+    
+    def __repr__(self):
+        import pprint
+        return f"{self.__class__}\n{pprint.pformat(_to_dict(self))}"
 
-
-def _namespacify(obj: object) -> object:
+def _namespacify(obj: object) -> _Namespace:
     if isinstance(obj, dict):
         return _Namespace({k: _namespacify(obj[k]) for k in obj})
     elif isinstance(obj, list):
         return [_namespacify(v) for v in obj]
+    else:
+        return obj
+    
+def _to_dict(obj: object) -> dict:
+    if isinstance(obj, _Namespace):
+        return dict( (k, _to_dict(v)) for k,v in obj.__dict__.items() )
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)( _to_dict(v) for v in obj )
     else:
         return obj
 
