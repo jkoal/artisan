@@ -71,13 +71,13 @@ definition.
           # array to an attribute creates a single-dataset HDF5 file.
           # Subscript syntax (`self['key'] = value`) is also supported.
           #
-          self.message = [f'Hello, {c.name}{c.punctuation}.']
+          self.message = f'Hello, {c.name}{c.punctuation}.'.encode()
 
           ####
           # Array fields can also be extended. `extend` implicitly
           # creates a file if necessary.
           #
-          self.extend('message', ['Be not afraid.', 'I come in peace.'])
+          self.extend('message', [b'Be not afraid.', b'I come in peace.'])
 
           ####
           # Assigning a path to a field copies the file at that
@@ -153,7 +153,7 @@ Existing artifacts can also be loaded by their paths.
 
   Greeting('Greeting_0000')
 
-Specifying a path *and* a specification returns a matching artifact, if it
+Providing a path *and* a specification returns a matching artifact, if it
 exists at that path, and otherwise creates one, at that path.
 
 .. code-block:: python
@@ -211,7 +211,7 @@ object property schemas.
 - Identifier definitions are translated to property names.
 - Type annotations are translated to "type", and sometimes "items", constraints.
   Supported types include `bool`, `int`, `float`, `str`, `NoneType`,
-  artifact or component specification types (*e.g.* `Greeting.Spec`), and
+  artifact or component configuration types (*e.g.* `Greeting.Conf`), and
   `typing.List` specializations of other supported types
   (*e.g.* `List[int]`).
 - Assignments (*e.g.* `x = 1`) add "default" fields.
@@ -219,7 +219,7 @@ object property schemas.
 - `dict` literals following definitions are merged into the schema.
   `(str, dict)` and `(dict, str)` literal pairs are also supported.
 
-A configurating entry matching `<SomeArtifactType>.Spec` must
+A configurating entry matching `<SomeArtifactType>.Conf` must
 
 - have a "type" field resloving, in the current `scope`, to a subclass of
   `<SomeArtifactType>`, and

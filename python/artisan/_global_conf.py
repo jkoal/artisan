@@ -30,7 +30,7 @@ class Conf:
 class ConfStack(threading.local):
     def __init__(self):
         super().__init__()
-        self.value = [Conf(root_dir='.', scope=default_scope)]
+        self.contents = [Conf(root_dir='.', scope=default_scope)]
 
 
 default_scope: Dict[str, type] = {}
@@ -39,27 +39,26 @@ conf_stack = ConfStack()
 
 def get_conf() -> Conf:
     'Returns the active configuration'
-    return conf_stack.value[-1]
+    return conf_stack.contents[-1]
 
 
 def push_conf(conf: Opt[Conf] = None, **updates: object) -> None:
     'Pushes a `Conf` onto the stack, making it the active `Conf`'
-    conf = get_conf() if conf is None else copy(conf)
+    conf = copy(get_conf() if conf is None else conf)
     for key, val in updates.items():
         setattr(conf, key, val)
     for val in conf.scope.values():
         assert isinstance(val, type)
-    conf_stack.value.append(conf)
-
+    conf_stack.contents.append(conf)
 
 def pop_conf() -> Conf:
     'Pops the top `Conf` off of the stack'
-    if len(conf_stack.value) == 1:
+    if len(conf_stack.contents) == 1:
         raise IndexError(
             'The default `Conf` can\'t be removed.\n\n'
             'i.e. You may no longer pop. The fun must stop here.'
         )
-    return conf_stack.value.pop()
+    return conf_stack.contents.pop()
 
 
 @contextmanager

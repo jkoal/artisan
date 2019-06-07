@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 from time import sleep
 from typing import (
-    Any, Iterator, Dict, Mapping, MutableMapping,
+    Any, Iterator, List, Mapping, MutableMapping,
     Optional as Opt, Tuple, Union, cast
 )
 
@@ -11,10 +11,11 @@ import h5py as h5
 import numpy as np
 from ruamel import yaml
 
+from ._configurables import Configurable, schema
 from ._global_conf import get_conf
-from ._configurable import Configurable, write_meta
+from ._namespaces import namespacify, Namespace
 
-__all__ = ['Artifact', 'ArrayFile', 'EncodedFile']
+__all__ = ['Artifact', 'ArrayFile', 'EncodedFile', 'write_meta']
 
 #-- Type aliases --------------------------------------------------------------
 
@@ -74,9 +75,10 @@ class Artifact(Configurable):
         if spec is not None:
             spec = {'type': _identify(cls), **spec}
 
-        # Instantiate the artifact.
+        # Instantiate the artifact. (TODO: Type should be loaded from _meta.yaml if possible.)
         artifact = cast(Artifact, Configurable.__new__(cls, spec or {}))
         object.__setattr__(artifact, 'path', path)
+        object.__setattr__(artifact, '_cached_keys', set())
 
         # Point its path to a matching prebuilt artifact, or build it.
         if path is None:
@@ -98,12 +100,12 @@ class Artifact(Configurable):
         pass
 
     @property
-    def meta(self) -> Rec:
+    def meta(self) -> Any:
         '''
         The metadata stored in `{self.path}/_meta.yaml`
         '''
         # TODO: Implement caching
-        return cast(Rec, _namespacify(_read_meta(self)))
+        return cast(Rec, namespacify(_read_meta(self)))
 
     #-- MutableMapping methods ----------------------------
 
@@ -180,10 +182,7 @@ class Artifact(Configurable):
         # Write a subartifact.
         elif isinstance(val, (Mapping, Artifact)):
             assert path.suffix == ''
-            MutRec.update(
-                cast(MutRec, Artifact(path)),
-                cast(Rec, val)
-            )
+            MutRec.update(Artifact(path), val) # type: ignore
 
         # Write an array.
         else:
@@ -233,16 +232,36 @@ class Artifact(Configurable):
 
     #-- Attribute-style element access --------------------
 
-    __getattr__ = __getitem__
-    __setattr__ = __setitem__
-    __delattr__ = __delitem__
+    def __getattr__(self, key: str) -> ArtifactEntry:
+        return self.__getitem__(key)
 
-    # [A hack to get REPL autocompletion to work]
+    def __setattr__(self, key: str, value: object) -> None:
+        self.__setitem__(key, value)
+
+    def __delattr__(self, key: str) -> None:
+        self.__delitem__(key)
+
+    #-- A hack to get REPL autocompletion to work ---------
+
     def __getattribute__(self, key: str) -> Any:
-        return (
-            {k: None for k in self} if key == '__dict__'
-            else object.__getattribute__(self, key)
-        )
+        if key in object.__getattribute__(self, '_cached_keys'):
+            try:
+                object.__setattr__(self, key, self[key])
+            except KeyError:
+                object.__delattr__(self, key)
+                object.__getattribute__(self, '_cached_keys').remove(key)
+        return object.__getattribute__(self, key)
+
+    def __dir__(self) -> List[str]:
+        for key in self._cached_keys:
+            object.__delattr__(self, key)
+        self._cached_keys.clear()
+
+        for key in set(self).difference(object.__dir__(self)):
+            object.__setattr__(self, key, self[key])
+            self._cached_keys.add(key)
+
+        return cast(list, object.__dir__(self))
 
 #-- Artifact construction -----------------------------------------------------
 
@@ -323,7 +342,7 @@ def _build(artifact: Artifact, spec: Rec) -> None:
 
     try:
         n_build_args = artifact.build.__code__.co_argcount
-        artifact.build(*([_Namespace(spec)] if n_build_args > 1 else []))
+        artifact.build(*([Namespace(spec)] if n_build_args > 1 else []))
         _write_meta(artifact, dict(spec=spec, status='done'))
     except BaseException as e:
         _write_meta(artifact, dict(spec=spec, status='stopped'))
@@ -400,40 +419,14 @@ def _write_meta(a: Artifact, meta: Rec) -> None:
     # (a.path / '_meta.yaml').write_text(yaml.round_trip_dump(meta))
     import json; (a.path / '_meta.yaml').write_text(json.dumps(meta))
 
-#-- Namespaces ----------------------------------------------------------------
 
-class _Namespace(Dict[str, object]):
-    'A `dict` that supports accessing items as attributes'
-
-    def __getattr__(self, key: str) -> Any:
-        return dict.__getitem__(self, key)
-
-    def __setattr__(self, key: str, val: object) -> None:
-        dict.__setitem__(self, key, val)
-
-    def __getattribute__(self, key: str) -> Any:
-        if key == '__dict__': return self
-        else: return object.__getattribute__(self, key)
-    
-    def __repr__(self):
-        import pprint
-        return f"{self.__class__}\n{pprint.pformat(_to_dict(self))}"
-
-def _namespacify(obj: object) -> _Namespace:
-    if isinstance(obj, dict):
-        return _Namespace({k: _namespacify(obj[k]) for k in obj})
-    elif isinstance(obj, list):
-        return [_namespacify(v) for v in obj]
-    else:
-        return obj
-    
-def _to_dict(obj: object) -> dict:
-    if isinstance(obj, _Namespace):
-        return dict( (k, _to_dict(v)) for k,v in obj.__dict__.items() )
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)( _to_dict(v) for v in obj )
-    else:
-        return obj
+def write_meta() -> None:
+    '''
+    Write global config information to `{root_path}/_meta.yaml`.
+    '''
+    meta = {'spec': None, 'schema': schema()}
+    meta_text = yaml.round_trip_dump(meta)
+    Path(f'{get_conf().root_dir}/_meta.yaml').write_text(meta_text)
 
 #-- Scope search --------------------------------------------------------------
 
